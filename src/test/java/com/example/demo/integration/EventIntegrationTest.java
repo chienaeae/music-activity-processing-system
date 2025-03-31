@@ -1,194 +1,230 @@
 package com.example.demo.integration;
 
 import java.time.Instant;
+import java.util.List;
 
+import org.flywaydb.core.Flyway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import com.example.demo.config.TestDatabaseConfig;
 import com.example.demo.dto.RawEventDTO;
+import com.example.demo.entity.EventEntity;
 import com.example.demo.model.ActionType;
+import com.example.demo.repository.EventRepository;
+import com.example.demo.service.AiEngineService;
+import com.example.demo.service.AnalyticsService;
 import com.example.demo.service.EventService;
-import com.example.demo.service.EventTrackerService;
+import com.example.demo.service.SocialService;
 
 @SpringBootTest
-public class EventIntegrationTest {
+@ActiveProfiles("test")
+@TestPropertySource(properties = {
+    "spring.jpa.hibernate.ddl-auto=create-drop"
+})
+class EventIntegrationTest extends TestDatabaseConfig {
 
     @Autowired
     private EventService eventService;
-    
+
     @Autowired
-    private EventTrackerService eventTrackerService;
+    private Flyway flyway;
+
+    @MockitoBean
+    private AnalyticsService analyticsService;
+
+    @MockitoBean
+    private AiEngineService aiEngineService;
+
+    @MockitoBean
+    private SocialService socialService;
+
+    @Autowired
+    private EventRepository eventRepository;
+    
+    // Only execute Flyway migration once before the test
+    private static boolean migrationApplied = false;
     
     @BeforeEach
     public void setup() {
-        eventTrackerService.reset();
+        // Only execute Flyway migration once before the test
+        if (!migrationApplied) {
+            try {
+                // Execute migration directly, without cleaning the database
+                flyway.migrate();
+                migrationApplied = true;
+                System.out.println("Flyway migrations applied successfully");
+            } catch (Exception e) {
+                System.err.println("Error during Flyway migration: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+        
+        // Clear the events table for testing
+        eventRepository.deleteAll();
     }
     
     @Test
     public void testPlayEvent() {
-        // prepare test data
-        RawEventDTO event = RawEventDTO.builder()
-                .userId("user123")
-                .action("play")
-                .songId("song456")
-                .timestamp(Instant.now())
-                .build();
+        // Create test event
+        RawEventDTO event = new RawEventDTO();
+        event.setUserId("user123");
+        event.setAction("play");
+        event.setSongId("song456");
+        event.setTimestamp(Instant.now());
+
+        // Send the event
+        eventService.sendEvent(event);
+
+        // Verify event was sent to correct services
+        Mockito.verify(analyticsService, Mockito.times(1)).processEvent(Mockito.any());
+        Mockito.verify(aiEngineService, Mockito.times(1)).processEvent(Mockito.any());
         
-        // send event
-        boolean sent = eventService.sendEvent(event);
-        assertTrue(sent, "Event should be sent successfully");
+        // Verify the event was stored in the database
+        sleep(1000); // Give some time for asynchronous processing
         
-        // wait for event processing
-        sleep(500);
-        
-        // verify results
-        assertEquals(1, eventTrackerService.getAnalyticsEventCount(ActionType.PLAY), 
-                "PLAY event should be sent to analytics service");
-        assertEquals(0, eventTrackerService.getAiEngineEventCount(ActionType.PLAY), 
-                "PLAY event should not be sent to AI engine");
-        assertEquals(0, eventTrackerService.getSocialEventCount(ActionType.PLAY), 
-                "PLAY event should not be sent to social service");
-        assertEquals(0, eventTrackerService.getStorageEventCount(ActionType.PLAY), 
-                "PLAY event should not be sent to storage service");
+        List<EventEntity> events = eventRepository.findByUserIdAndAction("user123", ActionType.PLAY);
+        assertEquals(1, events.size(), "There should be one PLAY event stored");
+        assertEquals("song456", events.get(0).getSongId());
+        assertEquals("PLAY", events.get(0).getCategory());
     }
     
     @Test
     public void testLikeEvent() {
-        // prepare test data
-        RawEventDTO event = RawEventDTO.builder()
-                .userId("user123")
-                .action("like")
-                .songId("song456")
-                .timestamp(Instant.now())
-                .build();
+        // Create test event
+        RawEventDTO event = new RawEventDTO();
+        event.setUserId("user123");
+        event.setAction("like");
+        event.setSongId("song456");
+        event.setTimestamp(Instant.now());
+
+        // Send the event
+        eventService.sendEvent(event);
+
+        // Verify event was sent to correct services
+        Mockito.verify(analyticsService, Mockito.times(1)).processEvent(Mockito.any());
+        Mockito.verify(aiEngineService, Mockito.times(1)).processEvent(Mockito.any());
+        Mockito.verify(socialService, Mockito.times(1)).shareEvent(Mockito.any());
         
-        // send event
-        boolean sent = eventService.sendEvent(event);
-        assertTrue(sent, "Event should be sent successfully");
+        // Verify the event was stored in the database
+        sleep(1000); // Give some time for asynchronous processing
         
-        // wait for event processing
-        sleep(500);
-        
-        // verify results
-        assertEquals(1, eventTrackerService.getAnalyticsEventCount(ActionType.LIKE), 
-                "LIKE event should be sent to analytics service");
-        assertEquals(1, eventTrackerService.getAiEngineEventCount(ActionType.LIKE), 
-                "LIKE event should be sent to AI engine");
-        assertEquals(0, eventTrackerService.getSocialEventCount(ActionType.LIKE), 
-                "LIKE event should not be sent to social service");
-        assertEquals(0, eventTrackerService.getStorageEventCount(ActionType.LIKE), 
-                "LIKE event should not be sent to storage service");
+        List<EventEntity> events = eventRepository.findByUserIdAndAction("user123", ActionType.LIKE);
+        assertEquals(1, events.size(), "There should be one LIKE event stored");
+        assertEquals("song456", events.get(0).getSongId());
+        assertEquals("LIKE", events.get(0).getCategory());
     }
     
     @Test
     public void testShareEvent() {
-        // prepare test data
-        RawEventDTO event = RawEventDTO.builder()
-                .userId("user123")
-                .action("share")
-                .songId("song456")
-                .timestamp(Instant.now())
-                .build();
+        // Create test event
+        RawEventDTO event = new RawEventDTO();
+        event.setUserId("user123");
+        event.setAction("share");
+        event.setSongId("song456");
+        event.setTimestamp(Instant.now());
+
+        // Send the event
+        eventService.sendEvent(event);
+
+        // Verify event was sent to correct services
+        Mockito.verify(analyticsService, Mockito.times(1)).processEvent(Mockito.any());
+        Mockito.verify(aiEngineService, Mockito.times(1)).processEvent(Mockito.any());
+        Mockito.verify(socialService, Mockito.times(1)).shareEvent(Mockito.any());
         
-        // send event
-        boolean sent = eventService.sendEvent(event);
-        assertTrue(sent, "Event should be sent successfully");
+        // Verify the event was stored in the database
+        sleep(1000); // Give some time for asynchronous processing
         
-        // wait for event processing
-        sleep(500);
-        
-        // verify results
-        assertEquals(1, eventTrackerService.getAnalyticsEventCount(ActionType.SHARE), 
-                "SHARE event should be sent to analytics service");
-        assertEquals(0, eventTrackerService.getAiEngineEventCount(ActionType.SHARE), 
-                "SHARE event should not be sent to AI engine");
-        assertEquals(1, eventTrackerService.getSocialEventCount(ActionType.SHARE), 
-                "SHARE event should be sent to social service");
-        assertEquals(0, eventTrackerService.getStorageEventCount(ActionType.SHARE), 
-                "SHARE event should not be sent to storage service");
+        List<EventEntity> events = eventRepository.findByUserIdAndAction("user123", ActionType.SHARE);
+        assertEquals(1, events.size(), "There should be one SHARE event stored");
+        assertEquals("song456", events.get(0).getSongId());
+        assertEquals("SHARE", events.get(0).getCategory());
     }
     
     @Test
     public void testLoginEvent() {
-        // prepare test data
-        RawEventDTO event = RawEventDTO.builder()
-                .userId("user123")
-                .action("login")
-                .timestamp(Instant.now())
-                .build();
+        // Create test event
+        RawEventDTO event = new RawEventDTO();
+        event.setUserId("user123");
+        event.setAction("login");
+        event.setSongId(null); // No song for login events
+        event.setTimestamp(Instant.now());
+
+        // Send the event
+        eventService.sendEvent(event);
+
+        // Verify event was sent to correct services
+        Mockito.verify(analyticsService, Mockito.times(1)).processEvent(Mockito.any());
+        Mockito.verify(aiEngineService, Mockito.never()).processEvent(Mockito.any());
+        Mockito.verify(socialService, Mockito.never()).shareEvent(Mockito.any());
         
-        // send event
-        boolean sent = eventService.sendEvent(event);
-        assertTrue(sent, "Event should be sent successfully");
+        // Verify the event was stored in the database
+        sleep(1000); // Give some time for asynchronous processing
         
-        // wait for event processing
-        sleep(500);
-        
-        // verify results - LOGIN should be sent to storage service
-        assertEquals(0, eventTrackerService.getAnalyticsEventCount(ActionType.LOGIN), 
-                "LOGIN event should not be sent to analytics service");
-        assertEquals(0, eventTrackerService.getAiEngineEventCount(ActionType.LOGIN), 
-                "LOGIN event should not be sent to AI engine");
-        assertEquals(0, eventTrackerService.getSocialEventCount(ActionType.LOGIN), 
-                "LOGIN event should not be sent to social service");
-        assertEquals(1, eventTrackerService.getStorageEventCount(ActionType.LOGIN), 
-                "LOGIN event should be sent to storage service");
+        List<EventEntity> events = eventRepository.findByUserIdAndAction("user123", ActionType.LOGIN);
+        assertEquals(1, events.size(), "There should be one LOGIN event stored");
+        assertNotNull(events.get(0).getProcessedAt(), "Processed time should be recorded");
+        assertEquals("LOGIN", events.get(0).getCategory());
     }
     
     @Test
     public void testFilteringInvalidEvent() {
-        // prepare test data - no userId
-        RawEventDTO event = RawEventDTO.builder()
-                .action("play")
-                .songId("song456")
-                .timestamp(Instant.now())
-                .build();
+        // Create test event with null userId (should be filtered out)
+        RawEventDTO event = new RawEventDTO();
+        event.setUserId(null);
+        event.setAction("play");
+        event.setSongId("song456");
+        event.setTimestamp(Instant.now());
+
+        // Send the event
+        eventService.sendEvent(event);
+
+        // Verify no services received the event
+        Mockito.verify(analyticsService, Mockito.never()).processEvent(Mockito.any());
+        Mockito.verify(aiEngineService, Mockito.never()).processEvent(Mockito.any());
+        Mockito.verify(socialService, Mockito.never()).shareEvent(Mockito.any());
         
-        // send event
-        boolean sent = eventService.sendEvent(event);
-        assertTrue(sent, "Event should be sent successfully");
+        // Verify no events were stored in the database
+        sleep(1000); // Give some time for asynchronous processing
         
-        // wait for event processing
-        sleep(500);
-        
-        // verify results - event should be filtered out
-        assertEquals(0, eventTrackerService.getAnalyticsEventCount(ActionType.PLAY), 
-                "Invalid event should be filtered out");
-        assertEquals(0, eventTrackerService.getAiEngineEventCount(ActionType.PLAY), 
-                "Invalid event should be filtered out");
-        assertEquals(0, eventTrackerService.getSocialEventCount(ActionType.PLAY), 
-                "Invalid event should be filtered out");
-        assertEquals(0, eventTrackerService.getStorageEventCount(ActionType.PLAY), 
-                "Invalid event should be filtered out");
+        List<EventEntity> events = eventRepository.findAll();
+        assertEquals(0, events.size(), "There should be no events stored");
     }
     
     @Test
     public void testBotEventsFiltered() {
-        // prepare test data - bot user
-        RawEventDTO event = RawEventDTO.builder()
-                .userId("bot_123")
-                .action("play")
-                .songId("song456")
-                .timestamp(Instant.now())
-                .build();
+        // Create test event with bot userId (should go only to storage)
+        RawEventDTO event = new RawEventDTO();
+        event.setUserId("bot_crawler");
+        event.setAction("play");
+        event.setSongId("song456");
+        event.setTimestamp(Instant.now());
+
+        // Send the event
+        eventService.sendEvent(event);
+
+        // Verify only storage received the event
+        Mockito.verify(analyticsService, Mockito.never()).processEvent(Mockito.any());
+        Mockito.verify(aiEngineService, Mockito.never()).processEvent(Mockito.any());
+        Mockito.verify(socialService, Mockito.never()).shareEvent(Mockito.any());
         
-        // send event
-        boolean sent = eventService.sendEvent(event);
-        assertTrue(sent, "Event should be sent successfully");
+        // Verify the event was stored in the database
+        sleep(1000); // Give some time for asynchronous processing
         
-        // wait for event processing
-        sleep(500);
-        
-        // verify results - event should be filtered out
-        assertEquals(0, eventTrackerService.getAnalyticsEventCount(ActionType.PLAY), 
-                "bot event should be filtered out");
+        List<EventEntity> events = eventRepository.findByUserIdAndAction("bot_crawler", ActionType.PLAY);
+        assertEquals(1, events.size(), "There should be one PLAY event stored for bot");
+        assertEquals("song456", events.get(0).getSongId());
+        assertEquals("PLAY", events.get(0).getCategory());
     }
     
-    // helper method, for waiting
     private void sleep(long milliseconds) {
         try {
             Thread.sleep(milliseconds);

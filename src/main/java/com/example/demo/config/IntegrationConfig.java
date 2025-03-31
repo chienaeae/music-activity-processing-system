@@ -15,7 +15,10 @@ import org.springframework.messaging.MessageChannel;
 import com.example.demo.dto.RawEventDTO;
 import com.example.demo.model.ActionType;
 import com.example.demo.model.Event;
-import com.example.demo.service.EventTrackerService;
+import com.example.demo.service.AiEngineService;
+import com.example.demo.service.AnalyticsService;
+import com.example.demo.service.SocialService;
+import com.example.demo.service.StorageService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,7 +26,10 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class IntegrationConfig {
     
-    private final EventTrackerService eventTrackerService;
+    private final AnalyticsService analyticsService;
+    private final AiEngineService aiEngineService;
+    private final StorageService storageService;
+    private final SocialService socialService;
 
     @Bean
     public MessageChannel eventInputChannel() {
@@ -76,8 +82,7 @@ public class IntegrationConfig {
                 .<Event>filter(event -> 
                     event.getUserId() != null && !event.getUserId().isEmpty() &&
                     event.getAction() != null &&
-                    (event.getSongId() != null || event.getAction() == ActionType.LOGIN || event.getAction() == ActionType.LOGOUT) &&
-                    !event.getUserId().startsWith("bot_"))
+                    (event.getSongId() != null || event.getAction() == ActionType.LOGIN || event.getAction() == ActionType.LOGOUT))
                 .channel(filteredEventChannel())
                 .route(new AbstractMessageRouter() {
                     @Override
@@ -85,12 +90,18 @@ public class IntegrationConfig {
                         Event event = (Event) message.getPayload();
                         ActionType action = event.getAction();
                         
+                        if (event.getUserId() != null && event.getUserId().startsWith("bot_")) {
+                            return List.of(storageChannel());
+                        }
+                        
                         if (null == action) {
                             return List.of(storageChannel());
                         } else return switch (action) {
-                            case PLAY, PAUSE, SKIP -> List.of(analyticsChannel());
-                            case LIKE, DISLIKE -> List.of(analyticsChannel(), aiEngineChannel());
-                            case SHARE -> List.of(analyticsChannel(), socialChannel());
+                            case PLAY -> List.of(analyticsChannel(), aiEngineChannel(), storageChannel());
+                            case PAUSE, SKIP -> List.of(analyticsChannel(), storageChannel());
+                            case LIKE, DISLIKE -> List.of(analyticsChannel(), aiEngineChannel(), socialChannel(), storageChannel());
+                            case SHARE -> List.of(analyticsChannel(), aiEngineChannel(), socialChannel(), storageChannel());
+                            case LOGIN, LOGOUT -> List.of(analyticsChannel(), storageChannel());
                             default -> List.of(storageChannel());
                         };
                     }
@@ -103,7 +114,7 @@ public class IntegrationConfig {
         return IntegrationFlow.from(analyticsChannel())
                 .<Event>handle((payload, headers) -> {
                     System.out.println("Sending event to analytics service: " + payload.getAction() + " - " + payload.getUserId());
-                    eventTrackerService.trackAnalyticsEvent(payload);
+                    analyticsService.processEvent(payload);
                     return null;
                 })
                 .get();
@@ -114,7 +125,7 @@ public class IntegrationConfig {
         return IntegrationFlow.from(aiEngineChannel())
                 .<Event>handle((payload, headers) -> {
                     System.out.println("Sending event to AI engine: " + payload.getAction() + " - " + payload.getUserId());
-                    eventTrackerService.trackAiEngineEvent(payload);
+                    aiEngineService.processEvent(payload);
                     return null;
                 })
                 .get();
@@ -125,7 +136,7 @@ public class IntegrationConfig {
         return IntegrationFlow.from(storageChannel())
                 .<Event>handle((payload, headers) -> {
                     System.out.println("Sending event to storage service: " + payload.getAction() + " - " + payload.getUserId());
-                    eventTrackerService.trackStorageEvent(payload);
+                    storageService.storeEvent(payload);
                     return null;
                 })
                 .get();
@@ -136,7 +147,7 @@ public class IntegrationConfig {
         return IntegrationFlow.from(socialChannel())
                 .<Event>handle((payload, headers) -> {
                     System.out.println("Sending event to social service: " + payload.getAction() + " - " + payload.getUserId());
-                    eventTrackerService.trackSocialEvent(payload);
+                    socialService.shareEvent(payload);
                     return null;
                 })
                 .get();

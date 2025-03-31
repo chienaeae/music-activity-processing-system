@@ -43,10 +43,54 @@
 			<scope>test</scope>
 		</dependency>
 
+		<!-- TestContainers -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+		
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>mssqlserver</artifactId>
+			<scope>test</scope>
+		</dependency>
+
     	<!-- Spring Integration -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+
+		<!-- Spring Data JPA -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa</artifactId>
+		</dependency>
+		
+		<!-- SQL Server -->
+		<dependency>
+			<groupId>com.microsoft.sqlserver</groupId>
+			<artifactId>mssql-jdbc</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+		<!-- Flyway Migration -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+
+		<!-- Flyway SQL Server -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-sqlserver</artifactId>
 		</dependency>
 
 		<!-- Lombok -->
@@ -103,6 +147,23 @@
 							<artifactId>lombok</artifactId>
 						</exclude>
 					</excludes>
+				</configuration>
+			</plugin>
+			
+			<!-- Flyway Maven Plugin -->
+			<plugin>
+				<groupId>org.flywaydb</groupId>
+				<artifactId>flyway-maven-plugin</artifactId>
+				<version>10.20.1</version>
+				<configuration>
+					<url>${env.FLYWAY_URL}</url>
+					<user>${env.FLYWAY_USER}</user>
+					<password>${env.FLYWAY_PASSWORD}</password>
+					<locations>
+						<location>classpath:db/migration</location>
+					</locations>
+					<baselineOnMigrate>true</baselineOnMigrate>
+					<validateOnMigrate>true</validateOnMigrate>
 				</configuration>
 			</plugin>
 		</plugins>
